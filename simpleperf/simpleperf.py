@@ -6,6 +6,7 @@ import socket
 import threading
 import threading as th
 import ipaddress
+import time
 
 
 # a function to run ifconfig and grab the first ipv4 address we find.
@@ -110,16 +111,43 @@ dashes = "-------------------------------------------------------------"
 # parse the arguments
 args = parse.parse_args()
 
-
-def server_handle_client(con, info):
-    # recieve a packet containing args from the client.
-    cli_args = con.recv(2042)
-    print(cli_args)
-
-
 # an instance of simpleperf may only be server or client
 if not (args.server ^ args.client):
     raise AttributeError("you must run either in server or client mode")
+
+def how_many_bytes(format, value):
+    if format == "B":
+        return int(value)
+    elif format == "KB":
+        return int(value * 1000)
+    elif format == "MB":
+        return int(value * 1_000_000)
+    else:
+        return int(value * 1_000_000_000)
+
+
+# function to handle a single connection from a client
+def server_handle_client(con, info):
+    # recieve a packet containing args from the client.
+    cli_args = con.recv(2042).decode()
+    # stores the clients, arguments.
+    unit = cli_args.split(":")[0]
+    value = cli_args.split(":")[1]
+
+    # string we will append bytes to.
+    total_bytes = ""
+    # if we expect to listen for a given time.
+    if unit == "time":
+        then = time.perf_counter()
+        now = time.perf_counter()
+        while (then - now) < value:
+            total_bytes += con.recv(1024).decode()
+    else:
+        format_value = cli_args.split(":")[3]
+        value = how_many_bytes(format_value, value)
+        while len(total_bytes) <= value:
+            total_bytes += con.recv(1024).decode()
+
 
 
 # function to handle incomming connections, they are handled in separate threads
@@ -163,13 +191,11 @@ def server():
             # start the thread
             t.start()
 
-def client_transfer():
+def client_transfer(id):
     # open a socket using ipv4 address(AF_INET), and a TCP connection (SOCK_STREAM)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as cli:
         serv_ip = args.serverip
         serv_port = int(args.port)
-
-        # build a byte message which is 1000 B aprox 1 KB
 
         # set a timeout timer.
         cli.settimeout(11)
@@ -185,27 +211,26 @@ def client_transfer():
 
         # let server now about how long to recieve, or how many bits to recieve (overrides time)
         if args.num:
-            cli_args = f"num:{args.num}"
+            print("num")
+            cli_args = f"num:{args.num}:form:{args.format}"
             # if format is in bytes, and value is less than 1 KB create byte sized message to send.
             # if args.format == "B" and int(args.num) < 1000:
             #     msg = "w".encode()
         else:
             cli_args = f"time:{args.time}"
 
+        # build a byte message which is 1000 B aprox 1 KB
         msg = ("wop!" * 250).encode()
 
-
         print(cli_args)
-        cli_args = f"{args.time}:{args.num}"
         cli.send(cli_args.encode())
-
 
 
 def client():
     # establish n connections acording to -P flag
     for i in range(args.parallel):
         # set up paralell connections.
-        t = threading.Thread(target=client_transfer)
+        t = threading.Thread(target=client_transfer, args=(i, ))
         # start threads
         t.start()
 
