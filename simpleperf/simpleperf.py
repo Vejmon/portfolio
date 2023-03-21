@@ -110,6 +110,7 @@ dashes = "-------------------------------------------------------------"
 
 # parse the arguments
 args = parse.parse_args()
+print(args)
 
 # an instance of simpleperf may only be server or client
 if not (args.server ^ args.client):
@@ -132,7 +133,7 @@ def server_handle_client(con, info):
     cli_args = con.recv(2042).decode()
     # stores the clients, arguments.
     unit = cli_args.split(":")[0]
-    value = cli_args.split(":")[1]
+    value = int(cli_args.split(":")[1])
 
     # string we will append bytes to.
     total_bytes = ""
@@ -141,11 +142,13 @@ def server_handle_client(con, info):
         then = time.perf_counter()
         now = time.perf_counter()
         while (then - now) < value:
+            print(f"recv on TIME {value}")
             total_bytes += con.recv(1024).decode()
     else:
         format_value = cli_args.split(":")[3]
         value = how_many_bytes(format_value, value)
         while len(total_bytes) <= value:
+            print(f"recv BYTES {value}")
             total_bytes += con.recv(1024).decode()
 
 
@@ -190,6 +193,8 @@ def server():
             t.setDaemon(True)
             # start the thread
             t.start()
+list_connections = []
+
 
 def client_transfer(id):
     # open a socket using ipv4 address(AF_INET), and a TCP connection (SOCK_STREAM)
@@ -209,27 +214,28 @@ def client_transfer(id):
         # print info
         print(f"{serv_ip}:{serv_port} connected with server {raddr}:{rport}")
 
+        # build a byte message which is 1000 B aprox 1 KB, unless we are working with single bytes.
+        if args.format == 'B':
+            msg = "w"
+        else:
+            msg = ("wop!" * 250).encode()
+
         # let server now about how long to recieve, or how many bits to recieve (overrides time)
         if args.num:
             print("num")
             cli_args = f"num:{args.num}:form:{args.format}"
-            # if format is in bytes, and value is less than 1 KB create byte sized message to send.
-            # if args.format == "B" and int(args.num) < 1000:
-            #     msg = "w".encode()
         else:
             cli_args = f"time:{args.time}"
+            th.Thread()
 
-        # build a byte message which is 1000 B aprox 1 KB
-        msg = ("wop!" * 250).encode()
-
-        print(cli_args)
-        cli.send(cli_args.encode())
 
 
 def client():
     # establish n connections acording to -P flag
     for i in range(args.parallel):
         # set up paralell connections.
+        list_connections[i] = {"id": i}
+
         t = threading.Thread(target=client_transfer, args=(i, ))
         # start threads
         t.start()
