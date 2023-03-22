@@ -7,11 +7,14 @@ import threading
 import threading as th
 import ipaddress
 import time
+import math
 
+
+connections = []
+connected = False
 
 # a function to run ifconfig and grab the first ipv4 address we find.
 # which makes sense to set as default address when running in server mode.
-
 def get_ip():
     # Run the ifconfig command and capture the output, and decode bytes to string
     ifconf = subprocess.check_output(['ifconfig']).decode()
@@ -82,7 +85,6 @@ def valid_num(inn):
     return ut
 
 
-
 # start the argument parser
 parse = argparse.ArgumentParser(description="optional arguments for simpleperf", epilog='simpleperf --help')
 
@@ -132,8 +134,10 @@ def server_handle_client(con, info):
     # recieve a packet containing args from the client.
     cli_args = con.recv(2042).decode()
     # stores the clients, arguments.
-    unit = cli_args.split(":")[0]
-    value = int(cli_args.split(":")[1])
+    cli_args_splitted = cli_args.split(":")
+    print(cli_args_splitted)
+    unit = cli_args_splitted[0]
+    value = cli_args_splitted[1]
 
     # string we will append bytes to.
     total_bytes = ""
@@ -156,8 +160,10 @@ def server_handle_client(con, info):
 # function to handle incomming connections, they are handled in separate threads
 def server():
     # tuple with ip, and port as an integer
+    print(type(args.port))
     serv_port = int(args.port)
     serv_ip = args.bind
+
 
     # open a socket using ipv4 address(AF_INET), and a TCP connection (SOCK_STREAM)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as serv:
@@ -193,10 +199,10 @@ def server():
             t.setDaemon(True)
             # start the thread
             t.start()
-list_connections = []
 
+def client_transfer(nr):
+    global connections
 
-def client_transfer(id):
     # open a socket using ipv4 address(AF_INET), and a TCP connection (SOCK_STREAM)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as cli:
         serv_ip = args.serverip
@@ -222,25 +228,69 @@ def client_transfer(id):
 
         # let server now about how long to recieve, or how many bits to recieve (overrides time)
         if args.num:
-            print("num")
-            cli_args = f"num:{args.num}:form:{args.format}"
+            a_connection = {"nr": nr,
+                            "local": f"{args.bind}:{args.port}",
+                            "remote": f"{raddr}:{rport}",
+                            "bytes:": int(args.num),
+                            "interval": int(args.interval),
+                            "sentBytes": 0}
+            cli_args = f"num:{args.num}:{args.interval}:{args.format}"
         else:
-            cli_args = f"time:{args.time}"
-            th.Thread()
+            a_connection = {"nr": nr,
+                            "local": f"{args.bind}:{args.port}",
+                            "remote": f"{raddr}:{rport}",
+                            "time": args.time,
+                            "interval": args.interval,
+                            "sentBytes":0}
+
+            cli_args = f"time:{args.time}:{args.interval}"
+        cli.send(cli_args.encode())
+        connections.append(a_connection)
+
+# stop printing when done sending bytes.
+def print_byte_client():
+    global connections
+    while True:
 
 
 
+    print(f"{dashes}\nID        Interval        Recieved        Bandwidth")
+
+# stop printing when time is met.
+def print_time_client():
+    global connections
+    step = int(args.interval)
+    prev_bytes = 0
+    print(f"{dashes}\nID        Interval        Recieved        Bandwidth")
+    then = time.perf_counter()
+    now = 0
+    while now - then < float(args.time): # funker ikkekeke
+        for i in range(args.parallel):
+            a_con = connections[i]
+            rate = a_con['sentBytes'] - prev_bytes
+            prev_bytes = a_con['sentBytes']
+            this_step = step * i
+            next_step = step * (i+1)
+            ut = f"[{a_con['nr']}] {a_con['local']}        {this_step} - {next_step}        {a_con}        {rate}"
+
+    time.sleep(step)
+    now = time.perf_counter()
+# creates seperate threads for the clients.
 def client():
     # establish n connections acording to -P flag
+    # and a print method for the connections.
     for i in range(args.parallel):
         # set up paralell connections.
-        list_connections[i] = {"id": i}
-
         t = threading.Thread(target=client_transfer, args=(i, ))
         # start threads
         t.start()
-
-
+    # wait untill we are connected
+    while not connected:
+        time.sleep(0.05)
+    if args.num:
+        print_byte_client()
+    else:
+        print_time_client()
 # if in server mode run server, otherwise run client mode
 if args.server:
     server()
