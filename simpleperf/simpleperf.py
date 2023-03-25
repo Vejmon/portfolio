@@ -358,23 +358,22 @@ def server_print(enServer, intervall):
     print(f"{dashes}\n  uniqueIDID        IP:Port           Interval             Recieved        Bandwidth\n")
 
     while not all(enServer.is_done):
-        print(enServer.is_done)
         then = time.perf_counter()
         prev_bytes = 0
         prev_step = 0
         time.sleep(intervall)
+        now = time.perf_counter()
+        between = now - then
+        next_step = "%.2f" % now
+        prev_step = 0
         for c in enServer.connections:
-            now = time.perf_counter()
-            next_step = (now - then)
             form_bytes = format_bytes(c.form, len(c.byte))
-            form_rate = format_bytes(c.form, len(c.byte) / next_step)
-            next_step = "%.2f" % next_step
+            form_rate = format_bytes(c.form, len(c.byte) / between)
+
             print(f"{id(c)}      {c.ip}:{c.port}       {prev_step} - {next_step}  "
                   f"   {form_bytes}        {form_rate}")
-            prev_step = next_step
-            then = time.perf_counter()
-            prev_bytes = len(c.byte)
-
+        then = time.perf_counter()
+        prev_step = next_step
 
 # stop printing when done sending bytes.
 def print_byte(clients, byte, interval):
