@@ -41,6 +41,8 @@ class TimeClient(EnCon):
         return '{"ip": "%s", "port": %s, "interval": %s, "tid": %s, "form": "%s", "parallel": %s}' % \
             (self.ip, self.port, self.interval, self.tid, self.form, self.parallel)
 
+    def get_important(self):
+        return [self.interval, self.tid, self.form, self.parallel, self.ip]
 
 class NumClient(EnCon):
     def __init__(self, ip, port, interval, num, form, parallel):
@@ -54,6 +56,9 @@ class NumClient(EnCon):
     def __str__(self):
         return '{"ip": "%s", "port": %s, "interval": %s, "num": %s, "form": "%s", "parallel": %s}' % \
             (self.ip, self.port, self.interval, self.num, self.form, self.parallel)
+
+    def get_important(self):
+        return [self.interval, self.num, self.form, self.parallel, self.ip]
 
 
 # a function to run ifconfig and grab the first ipv4 address we find.
@@ -172,6 +177,8 @@ def how_many_bytes(format, value):
     else:
         return int(value * 1_000_000_000)
 
+def returnMbps(value):
+    return "%.2fMbps" % (value * 8 / 1_000_000)
 
 def format_bytes(format, value):
     if format == "B":
@@ -211,15 +218,15 @@ def server_handle_client(con, serveren):
                                    cli_args['tid'], cli_args['form'], cli_args['parallel'])
 
     # append the connection to our server object
+    connection_number = len(serveren.connections)
     serveren.connections.append(remote_client)
-    denne_sin_teller = con_global_cnt
-    con_global_cnt = con_global_cnt + 1
+    # con_global_cnt = con_global_cnt + 1
     serveren.is_done.append(False)
-    print(denne_sin_teller)
+    print(connection_number)
     # start a print session when all are connected. and set up a new server object
     if len(serveren.connections) == remote_client.parallel:
         nyServer = True
-        con_teller = 0
+        # con_teller = 0
         th.Thread(target=server_print, args=(serveren, remote_client.interval)).start()
         # if isinstance(remote_client, NumClient):
         #     th.Thread(target=print_byte, args=(serveren.connections, remote_client.num, remote_client.interval)).start()
@@ -233,27 +240,8 @@ def server_handle_client(con, serveren):
     while lastChar != "D":
         remote_client.byte = con.recv(1024).decode()
         lastChar = remote_client.byte[-1]
-    serveren.is_done[denne_sin_teller] = True
+    serveren.is_done[connection_number] = True
 
-# print til siste er D
-
-
-"""    
-    if isinstance(remote_client, NumClient):
-        treshold = how_many_bytes(remote_client.form, remote_client.num)
-        while len(remote_client.byte) < treshold:
-            msg = con.recv(1024).decode()
-            remote_client.byte += msg
-    else:
-        then = time.perf_counter()
-        now = time.perf_counter()
-        while (now - then) < remote_client.tid:
-            msg = con.recv(1024).decode()
-            
-            remote_client.byte += msg
-            now = time.perf_counter()
-
-"""
 
 # function to handle incomming connections, they are handled in separate threads
 def server():
@@ -354,26 +342,35 @@ def transfer_byte_client(enClient):
 
 # prints until client says claims transfer is done
 def server_print(enServer, intervall):
+    # we first check that all the connections we got are from the same client,
+    # I belive I have a bug here, that if two clients open a connection at the exact same time.
+    # the list of clients may be a mixed list.
+
+    # if the list has more than one connection
+    if len(enServer.connections) > 1:
+        for i in range(1, len(enServer.connections)):
+            if enServer.connections[i-1].get_important() != enServer.connections[i].get_important():
+                raise TypeError('Mixed set of clients!!!!')
+
     # prints labels
     print(f"{dashes}\n  uniqueIDID        IP:Port           Interval             Recieved        Bandwidth\n")
-
+    start = time.perf_counter()
     while not all(enServer.is_done):
         then = time.perf_counter()
         prev_bytes = 0
         prev_step = 0
         time.sleep(intervall)
         now = time.perf_counter()
-        between = now - then
-        next_step = "%.2f" % now
-        prev_step = 0
+        next_step = now - start
         for c in enServer.connections:
             form_bytes = format_bytes(c.form, len(c.byte))
-            form_rate = format_bytes(c.form, len(c.byte) / between)
+            rate = returnMbps(len(c.byte) / (next_step))
 
             print(f"{id(c)}      {c.ip}:{c.port}       {prev_step} - {next_step}  "
-                  f"   {form_bytes}        {form_rate}")
-        then = time.perf_counter()
+                  f"   {form_bytes}        {rate}")
+            print(len(c.byte))
         prev_step = next_step
+
 
 # stop printing when done sending bytes.
 def print_byte(clients, byte, interval):
@@ -397,6 +394,7 @@ def print_byte(clients, byte, interval):
                 full_list[i] = True
             print(f"{c.ip}:{c.port}       {this_step} - {next_step}  "
                   f"   {form_bytes}        {form_rate}")
+            print(len(c.byte))
     print(f"\n{dashes}")
 
 # stop printing when time is met.
@@ -415,10 +413,13 @@ def print_time(clients, tid, interval):
             form_bytes = format_bytes(c.form, len(c.byte))
             print(f"{id(c)}   {c.ip}:{c.port}        {this_step} - {next_step}"
                   f"        {form_bytes}       {form_rate}")
+            print(len(c.byte))
 
         this_step = this_step + 1
         next_step = next_step + 1
         now = time.perf_counter()
+
+
     print(f"\n{dashes}")
 
 # creates seperate threads for the clients.
