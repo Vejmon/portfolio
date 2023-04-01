@@ -272,6 +272,7 @@ def server():
             t = th.Thread(target=server_handle_client, args=(con, server), daemon=True)
             # start the thread
             t.start()
+            # time.sleep(1)
 
 
 def transfer_time_client(enClient):
