@@ -275,9 +275,10 @@ def server_handle_client(con, serveren):
     t.start()
 
     while lastChar != "D":
-        time.sleep(0.7)
+        time.sleep(2)
         data = remote_client.byte[len(remote_client.byte) - 1].decode()
         lastChar = data[-1]
+        print(lastChar)
         if not data:
             # if there is no data, something has gone wrong, and we quit.
             print(f"Connection with {remote_client.ip}:{remote_client.port} has failed!")
@@ -328,7 +329,8 @@ def server():
 
 
 #
-def transfer_time_client(enClient):
+def transfer_time_client(enClient, full_list):
+    number = len(full_list) - 1
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as cli:
 
         cli.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
@@ -358,6 +360,7 @@ def transfer_time_client(enClient):
         t.start()
         while (now - then) < enClient.tid:
             time.sleep(0.7)
+        full_list[number] = True
         enClient.is_done = True
         cli.send("D".encode())
 
@@ -373,7 +376,8 @@ def transfer_time_client(enClient):
         cli.close()
 
 
-def transfer_byte_client(enClient):
+def transfer_byte_client(enClient, full_list):
+    number = len(full_list) -1
     # open a socket using ipv4 address(AF_INET), and a TCP connection (SOCK_STREAM)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as cli:
         cli.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
@@ -413,7 +417,9 @@ def transfer_byte_client(enClient):
         t.start()
 
         while len(enClient.byte) < treshold:
-            time.sleep(0.7)
+            time.sleep(2)
+
+        full_list[number] = True
         enClient.is_done = True
         # when we are finished, send the code D for done:
         cli.send("D".encode())
@@ -461,11 +467,7 @@ def server_print(enServer):
 
 
 # stop printing when done sending bytes.
-def print_byte(clients, list, interval):
-    full_list = []
-    for cli in clients:
-        full_list.append(cli.is_done)
-    start = time.time()
+def print_byte(clients, full_list, interval):
     # prints labels
     print(f"{dashes}\n  IP:Port           Interval             Sent        Bandwidth\n")
 
@@ -475,43 +477,37 @@ def print_byte(clients, list, interval):
     then = time.time()
     now = 0
     prev_step = 0.0
+    start = time.time()
     for c in clients:
         prev_bytes.append(0)
 
     # prints while we are sending, attemps to break cycle when done
     while not all(full_list):
-        # breaks the intervall if we are done sending
-        while (now - then) < interval:
-            time.sleep(0.1)
-            now = time.time()
-            full_list = []
-            for cli in clients:
-                full_list.append(cli.is_done)
-            if all(full_list):
-                break
+        time.sleep(0.7)
+        now = time.time()
 
-        then = time.time()
-        next_step = "%.2f" % (now - start)
-        for i in range(len(clients)):
-            c = clients[i]
-            num_byte = len(c.byte)
-            # get current rate, e.g. how many bytes have been sent since last print
-            a_prev_byte = num_byte - prev_bytes[i]
-            # store current amount of bytes for next time around.
-            prev_bytes[i] = num_byte
-            # returns a string with sent bytes in correct format.
-            form_bytes = format_bytes(c.form, num_byte)
-            # returns a string with Mbps when given bytes/seconds.
-            rate = returnMbps(a_prev_byte / interval)
-            print(f"{c.ip}:{c.port}       {prev_step} - {next_step}  "
-                  f"   {form_bytes}        {rate}")
+        if (now - then) > interval:
+            next_step = "%.2f" % (now - start)
+            then = time.time()
+            for i in range(len(clients)):
+                c = clients[i]
+                num_bytes = 0
+                for j in range(c.byte):
+                    num_bytes += len(c.byte[i])
 
-        prev_step = next_step
+                a_prev_byte = num_bytes - prev_bytes[i]
+                prev_bytes[i] = num_bytes
+                form_bytes = format_bytes(c.form, num_bytes)
+                rate = returnMbps(a_prev_byte / interval)
+
+                print(f"{c.ip}:{c.port}        {prev_step} - {next_step}"
+                      f"        {form_bytes}       {rate}")
+            prev_step = next_step
         # we need to quit after one run if time and intervall are equal
 
 
 # stop printing when time is met.
-def print_time(clients, tid, interval, list):
+def print_time(clients, tid, interval, full_list):
     # if time interval is bigger than time, we print after time is done.
     # example tid = 4, and interval 50, doesn't make much sense
     if interval > tid:
@@ -521,6 +517,7 @@ def print_time(clients, tid, interval, list):
     print(f"{dashes}\n IP:Port            Interval           Sent        Bandwidth\n")
     #
     start = time.time()
+    then = time.time()
     now = 0
     prev_step = 0.0
     # a list containing how many bytes each client has recieved
@@ -528,22 +525,24 @@ def print_time(clients, tid, interval, list):
     for c in clients:
         prev_bytes.append(0)
 
-    while (now - start) < tid:
-        time.sleep(interval)
+    while not all(full_list):
+        time.sleep(0.7)
         now = time.time()
-        next_step = "%.2f" % (now - start)
 
-        for i in range(len(clients)):
-            c = clients[i]
-            num_bytes = len(c.byte)
-            a_prev_byte = num_bytes - prev_bytes[i]
-            prev_bytes[i] = num_bytes
-            form_bytes = format_bytes(c.form, num_bytes)
-            rate = returnMbps(a_prev_byte / interval)
+        if (now - then) > interval:
+            next_step = "%.2f" % (now - start)
+            then = time.time()
+            for i in range(len(clients)):
+                c = clients[i]
+                num_bytes = c.byte
+                a_prev_byte = num_bytes - prev_bytes[i]
+                prev_bytes[i] = num_bytes
+                form_bytes = format_bytes(c.form, num_bytes)
+                rate = returnMbps(a_prev_byte / interval)
 
-            print(f"{c.ip}:{c.port}        {prev_step} - {next_step}"
-                  f"        {form_bytes}       {rate}")
-        prev_step = next_step
+                print(f"{c.ip}:{c.port}        {prev_step} - {next_step}"
+                      f"        {form_bytes}       {rate}")
+            prev_step = next_step
 
     print(f"\n{dashes}")
 
@@ -559,16 +558,16 @@ def client():
         for i in range(args.parallel):
             en_con = NumClient(args.serverip, args.port, args.interval, args.num, args.format, args.parallel, 0)
             clients.append(en_con)
-            full_list.append(en_con.is_done)
-            th.Thread(target=transfer_byte_client, daemon=False, args=(en_con,full_list)).start()
+            full_list.append(False)
+            th.Thread(target=transfer_byte_client, daemon=False, args=(en_con, full_list)).start()
         time.sleep(0.5)
         th.Thread(target=print_byte, args=(clients, full_list, args.interval), daemon=True).start()
     else:
         for i in range(args.parallel):
             en_con = TimeClient(args.serverip, args.port, args.interval, args.time, args.format, args.parallel, 0)
             clients.append(en_con)
-            full_list.append(en_con.is_done)
-            th.Thread(target=transfer_time_client, daemon=False, args=(en_con,full_list)).start()
+            full_list.append(False)
+            th.Thread(target=transfer_time_client, daemon=False, args=(en_con, full_list)).start()
         time.sleep(0.5)
         th.Thread(target=print_time, daemon=True, args=(clients, args.time, args.interval, full_list)).start()
 
