@@ -326,6 +326,7 @@ def server():
             t = th.Thread(target=server_handle_client, args=(con, server), daemon=True)
             # start the thread
             t.start()
+            time.sleep(2)
 
 
 #
@@ -334,7 +335,7 @@ def transfer_time_client(enClient, full_list):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as cli:
 
         cli.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
-        cli.settimeout(11)
+        # cli.settimeout(11)
         try:
             cli.connect((enClient.ip, enClient.port))
         except ConnectionError:
@@ -383,7 +384,7 @@ def transfer_byte_client(enClient, full_list):
         cli.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
 
         # set a timeout timer.
-        cli.settimeout(11)
+        # cli.settimeout(11)
         try:
             cli.connect((enClient.ip, enClient.port))
         except ConnectionError:
