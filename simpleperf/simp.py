@@ -58,22 +58,22 @@ class AllClient:
         self.prev_bytes = 0
         self.id = ""
         self.con = con
-        self.raddr = ""
-        self.rport = 0
+        self.raddr, self.rport, self.laddr, self.lport = self.set_addr()
 
-    def set_remote_address(self, raddr, rport):
-        self.raddr = raddr
-        self.rport = rport
+    def set_addr(self):
+        raddr, rport = self.con.getpeername()
+        laddr, lport = self.con.getsockname()
+        return raddr, rport, laddr, lport
 
     def print_connection_statement(self):
-        print(f"local: {self.ip}:{self.port} connected with remote: {self.raddr}:{self.rport}")
+        print(f"local: {self.laddr}:{self.lport} connected with remote: {self.raddr}:{self.rport}")
 
     def set_socket(self, con):
         self.con = con
 
     def format_bytes(self, value):
         if self.form == "B":
-            return int(value, self.form)
+            return "%.2f%s" % (value, self.form)
         elif self.form == "KB":
             a = (value / 1000.0)
             return "%.2f%s" % (a, self.form)
@@ -85,26 +85,19 @@ class AllClient:
             return "%.2f%s" % (a, self.form)
 
     def gracefully_close_client(self):
-        self.con.send("BYE".encode())
         data = self.con.recv(1024).decode()
+        print(data)
         if data == "ACK:BYE":
-            self.con.shutdown(1)
-            self.con.close()
-            return True
-        return False
-
-    def gracefully_close_server(self, data):
-        if "BYE" in data:
-            self.con.send("ACK:BYE".encode())
-            self.con.shutdown(1)
             self.con.close()
         else:
-            print(f"{self.ip} fant ikke BYE!")
-            data = self.con.recv(1024).decode()
-            if "BYE" in data:
-                self.con.send("ACK:BYE".encode())
-                self.con.shutdown(1)
-                self.con.close()
+            print("fant ikke ACK!")
+            self.con.close()
+            sys.exit(1)
+
+    def gracefully_close_server(self):
+        self.con.send("ACK:BYE".encode())
+        self.con.shutdown(1)
+        self.con.close()
 
     def recieve_bytes(self):
         while not self.is_done:
@@ -112,15 +105,18 @@ class AllClient:
             data = self.con.recv(2048)
             # if the there is no information in the chunk, we quit.
             if not data:
-                print(f"Connection {self.ip}:{self.port} has failed!")
+                self.is_done = True
+                print(f"Connection {self.raddr}:{self.rport} has failed!")
                 sys.exit(1)
 
             # we add the chunk to the tally
             self.byte = self.byte + len(data)
-            # if the last part of a recieved chunk is 'D' for Done we are done recieving.
-            if data.decode()[-1] == "D":
+            # search after a BYE statement from the client
+            data_decoded = data.decode()
+
+            if "BYE" in data_decoded:
                 self.is_done = True
-                self.gracefully_close_server(data)
+                self.gracefully_close_server()
                 break
 
     # msg must be bytes sized and size must be an int
@@ -130,32 +126,32 @@ class AllClient:
             self.con.send(msg)
             self.byte = self.byte + size
 
-    def intervall_print(self, now, then, start, totals):
+    def intervall_print(self, now, then, start):
+        # fjern totals!
 
-        interval_time = now - then
-        if totals:
-            interval_bytes = self.byte
-        else:
-            interval_bytes = self.byte - self.prev_bytes
-
-        str_then = "%.2f's'" % (then - start)
-        str_now = "%.2f's'" % (now - then)
-        str_recieved = self.format_bytes(interval_bytes)
-        interval_bytes_ps = "%.2fMbps" % (interval_bytes * 0.000008 / interval_time)
-
-        print(f"{self.ip}:{self.port}       {str_then} - {str_now}  "
-              f"   {str_recieved}        {interval_bytes_ps}")
+        interval_bytes = self.byte - self.prev_bytes
         self.prev_bytes = self.byte
+        str_then = "%.2fs" % (then - start)
+        str_now = "%.2fs" % (now - start)
+        interval_time = now - then
+        str_recieved = self.format_bytes(interval_bytes)
+
+        interval_bytes_ps = "%.2fMbps" % ((interval_bytes * 0.000008) / interval_time)
+
+        print(f"{self.laddr}:{self.lport}       {str_then} - {str_now}  "
+              f"   {str_recieved}        {interval_bytes_ps}")
 
     def server_print(self, now, start):
         interval_time = now - start
+
         # rate for the total duration of a recieving server. 0.000008 = (mega*bits) = (8/1_000_000)
         interval_bytes_ps = "%.2fMbps" % (self.byte * 0.000008 / interval_time)
-        str_now = "%.2f's'" % interval_time
+        str_now = "%.2fs" % interval_time
         str_recieved = self.format_bytes(self.byte)
 
-        print(f"{self.ip}:{self.port}       0.00 - {str_now}  "
+        print(f"{self.laddr}:{self.lport}        0.00s - {str_now}  "
               f"   {str_recieved}        {interval_bytes_ps}")
+        self.prev_bytes = self.byte
 
     def generate_msg(self):
         if self.form == "B":
@@ -174,18 +170,16 @@ class TimeClient(AllClient):
         super().__init__(ip, port, interval, form, parallel, con)
         self.tid = tid
 
+    def tid_done(self, now):
+        if now > self.tid:
+            self.is_done = True
+
     def __str__(self):  # prints a string in JSON formatting representing the client
         return '{"ip": "%s", "port": %s, "interval": %s, "tid": %s, "form": "%s", "parallel": %s}' % \
             (self.ip, self.port, self.interval, self.tid, self.form, self.parallel)
 
     def get_important(self):  # used for validating that the list of connected clients are equal
         return [self.interval, self.tid, self.form, self.parallel, self.ip]
-
-    """def time_finished(self, now, then):
-        if (now - then) > self.tid:
-            self.is_done = True
-            return True
-        else:"""
 
 
 # num clients override a time client, since the time flag is always set by default.
@@ -359,33 +353,40 @@ def time_client(clients):
 
     # start a timer and a time for the periods between intervalls
     start = time.time()
-    now = time.time()
+    now = start
     then = 0.0
     number_of_prints = 0
 
     # create individual threads for each connection to send bytes.
     for c in clients.connections:
         th.Thread(target=c.send_bytes, daemon=True, args=(msg, msg_size)).start()
-
     # periodically check if we are done transmitting
     for i in range(loops):
         time.sleep(args.interval)
         now = time.time()
 
         for c in clients.connections:
-            c.intervall_print(now, then, start, False)
-            then = time.time()
-    number_of_prints = number_of_prints + 1
+            if number_of_prints == 0:
+                c.server_print(now, start)
+            else:
+                c.intervall_print(now, then, start)
+        then = time.time()
+        number_of_prints = number_of_prints + 1
+
+    # set all connections to done
+    for c in clients.connections:
+        c.is_done = True
 
     # if we have more than one interval, print a totalsum, for all
     if number_of_prints > 1:
         print(f"{dashes}\nTotals:\n")
         for c in clients.connections:
-            c.intervall_print(now, start, start, True)
+            c.server_print(now, start)
+
 
     # transmitt a D for done
     for c in clients.connections:
-        c.con.send("D".encode())
+        c.con.send("BYE".encode())
 
     # allow server to catch up
     time.sleep(0.5)
@@ -407,8 +408,8 @@ def num_client(clients):
 
     # start a timer and a time for the periods between intervalls
     start = time.time()
-    now = time.time()
-    then = 0.0
+    now = start
+    then = start
     number_of_prints = 0
 
     # create individual threads for each connection to send bytes.
@@ -422,20 +423,25 @@ def num_client(clients):
         for c in clients.connections:
             c.byte_finished()
         # if print intervall is met we print a statemnt for each connection
-        if (now - start) > args.time:
+        if (now - then) > args.interval:
             for c in clients.connections:
-                c.intervall_print(now, then, start, False)
-                then = time.time()
-        number_of_prints = number_of_prints + 1
+                if number_of_prints == 0:
+                    c.server_print(now, then)
+                else:
+                    c.intervall_print(now, then, start)
+            number_of_prints = number_of_prints + 1
+            then = time.time()
         time.sleep(0.3)
     # transmitt a D for done
     for c in clients.connections:
-        c.con.send("D".encode())
+        c.is_done = True
+        c.con.send("BYE".encode())
 
     # print an end statement for each connection if we have more than one intervall
-    if number_of_prints > 1:
+    if 0 == number_of_prints or 1 < number_of_prints:
+        print(f"{dashes}\nTotals:\n")
         for c in clients.connections:
-            c.intervall_print(now, then, start, True)
+            c.server_print(now, start)
 
     # allow server to catch up
     time.sleep(0.5)
@@ -510,7 +516,7 @@ def server_handle_clients(clients):
     now = time.time()
     # print the calculation from the different connections
     for c in clients.connections:
-        c.server_print(start, now)
+        c.server_print(now, start)
 
 
 def server():
@@ -537,13 +543,11 @@ def server():
             # quit if the user terminates the program
             except KeyboardInterrupt:
                 print("interrupt recieved, attempting to shut down")
-                servsock.shutdown(1)
                 servsock.close()
-                sys.exit()
+                sys.exit(1)
             # quit if the connection fails for some reason
             except ConnectionError:
                 print("Connection failed, attempting to shut down")
-                servsock.shutdown(1)
                 servsock.close()
                 sys.exit(1)
 
