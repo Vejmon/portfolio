@@ -71,6 +71,7 @@ class AllClient:
         self.id = ""
         self.con = con
         self.treshold = math.inf
+        self.time_done = 0.0
 
     #
     def print_connection_statement(self):
@@ -83,17 +84,34 @@ class AllClient:
         self.con = con
 
     def gracefully_close_client(self):
+        try:
+            self.con.send("BYE".encode())
+        except ConnectionResetError:
+            print(f"Connection to {args.serverip}:{args.port} can't be established, attempting to close")
+            self.con.close()
+            self.is_done = True
+        except BrokenPipeError:
+            print(f"Connection to {args.serverip}:{args.port} can't be established, attempting to close")
+            self.con.close()
+            self.is_done = True
+
         data = self.con.recv(1024).decode()
-        print(data)
         if data == "ACK:BYE":
+            print(f"{data} recieved from {self.ip}:{self.port}, closing socket")
             self.con.close()
         else:
-            print("fant ikke ACK!")
+            print("didn't find ACK!, attempting to close")
             self.con.close()
-            sys.exit(1)
 
     def gracefully_close_server(self):
-        self.con.send("ACK:BYE".encode())
+        try:
+            self.con.send("ACK:BYE".encode())
+        except ConnectionResetError:
+            print(f"Connection to {args.serverip}:{args.port} has ended, client can't be reached")
+            self.is_done = True
+        except BrokenPipeError:
+            print(f"Connection to {args.serverip}:{args.port} has ended, client can't be reached")
+            self.con.close()
         self.con.shutdown(1)
         self.con.close()
 
@@ -103,6 +121,7 @@ class AllClient:
             data = self.con.recv(2048)
             # if the there is no information in the chunk, we quit.
             if not data:
+                self.time_done = time.time()
                 self.is_done = True
                 print(f"Connection remote: {self.ip}:{self.port} has failed!")
                 sys.exit(1)
@@ -114,20 +133,27 @@ class AllClient:
 
             if "BYE" in data_decoded:
                 self.is_done = True
+                self.time_done = time.time()
                 self.gracefully_close_server()
                 break
 
     # msg must be bytes sized and size must be an int
     # and be the amount of bytes, we wish to transfer
     def send_bytes(self, msg, size):
-        while not self.is_done and self.byte < self.treshold:
+        while not self.is_done:
             try:
                 self.con.send(msg)
             except ConnectionResetError:
                 print(f"Connection to {args.serverip}:{args.port} has failed! server has ended")
                 self.is_done = True
-                sys.exit(1)
+            except BrokenPipeError:
+                print(f"Connection to {args.serverip}:{args.port} has failed! server has ended")
+                self.is_done = True
+            # increment number of bytes sent
             self.byte = self.byte + size
+            #
+            if self.byte >= self.treshold:
+                self.is_done = True
 
     def intervall_print(self, now, then, start):
         # fjern totals!
@@ -191,11 +217,8 @@ class NumClient(AllClient):
     def __init__(self, ip, port, interval, num, form, parallel, con):
         super().__init__(ip, port, interval, form, parallel, con)
         self.num = num
+        self.time_done = 0.0
         self.treshold = self.how_many_bytes()
-
-    def byte_finished(self):
-        if self.byte >= self.treshold:
-            self.is_done = True
 
     def how_many_bytes(self):
         if self.form == "B":
@@ -382,50 +405,38 @@ def time_client(clients):
     for c in clients.connections:
         th.Thread(target=c.send_bytes, daemon=True, args=(msg, msg_size)).start()
     # periodically check if we are done transmitting
-    for i in range(loops):
-        while (now - then) < args.interval:
-            if clients.any_done():
-                print("what")
-                break
-            time.sleep(0.3)
-            now = time.time()
+    while (now - start) < args.time and not clients.any_done():
 
-        for c in clients.connections:
+        if (now - then) > args.interval:
             if number_of_prints == 0:
-                c.server_print(now, start)
+                for c in clients.connections:
+                    c.server_print(now, start)
             else:
-                c.intervall_print(now, then, start)
-        then = time.time()
-        number_of_prints = number_of_prints + 1
+                for c in clients.connections:
+                    c.intervall_print(now, then, start)
+            number_of_prints = number_of_prints + 1
+            then = time.time()
+            print("--")
+
+        time.sleep(0.1)
+        now = time.time()
+    for c in clients.connections:
+        c.intervall_print(now, then, start)
 
     # set all connections to done
+    print(f"{dashes}\nTotals:")
     for c in clients.connections:
         c.is_done = True
+        c.server_print(now, start)
 
-    # if we have more than one interval, print a totalsum, for all
-    if number_of_prints > 1:
-        print(f"{dashes}\nTotals:\n")
-        for c in clients.connections:
-            c.server_print(now, start)
-
-    # transmitt a D for done
+    # send a bye message to server to let it know we are done.
     for c in clients.connections:
-        c.con.send("BYE".encode())
+        th.Thread(target=c.gracefully_close_client, daemon=True).start()
 
-    # allow server to catch up
-    time.sleep(0.5)
-
-    # close all the connections
-    for c in clients.connections:
-        th.Thread(target=c.gracefully_close_client).start()
-
+    time.sleep(2)
 
 def num_client(clients):
-    # print a connection statement from each client
-    for c in clients.connections:
-        c.print_connection_statement()
-    # print a header for the transfer of bytes
-    print(f"{dashes}\n{client_header}\n")
+
     # calculate the size of the message to be sent
     msg = clients.connections[0].generate_msg()
     msg_size = len(msg)
@@ -436,50 +447,55 @@ def num_client(clients):
     then = start
     number_of_prints = 0
 
-    # create individual threads for each connection to send bytes.
-
     for c in clients.connections:
+        # print a connection statement from each client
+        c.print_connection_statement()
+        # create individual threads for each connection to send bytes.
         th.Thread(target=c.send_bytes, daemon=True, args=(msg, msg_size)).start()
+
+    # print a header for the transfer of bytes
+    print(f"{dashes}\n{client_header}\n")
 
     # periodically check if we are done transmitting
     while not clients.all_done():
+        time.sleep(0.1)
         now = time.time()
         for c in clients.connections:
-            c.byte_finished()
-        # if print intervall is met we print a statemnt for each connection
+            # store time, if transmission isn't done
+            if not c.is_done:
+                c.time_done = now
+
+        # if print intervall is met we print a statement for each connection
         if (now - then) > args.interval:
             for c in clients.connections:
+
                 if number_of_prints == 0:
-                    c.server_print(now, then)
+                    if not c.is_done:
+                        c.server_print(c.time_done, then)
                 else:
-                    c.intervall_print(now, then, start)
+                    if not c.is_done:
+                        c.intervall_print(c.time_done, then, start)
+
+            print("--") # used to group together prints
             number_of_prints = number_of_prints + 1
             then = time.time()
-        time.sleep(0.3)
-    # transmitt a D for done
+
+
+    # print total sum, if we have more than one print or no prints
+    print(f"{dashes}\nTotals:\n")
     for c in clients.connections:
-        c.is_done = True
-        c.con.send("BYE".encode())
+        c.server_print(c.time_done, start)
 
-    # print an end statement for each connection if we have more than one intervall
-    if 0 == number_of_prints or 1 < number_of_prints:
-        print(f"{dashes}\nTotals:\n")
-        for c in clients.connections:
-            c.server_print(now, start)
-
-    # allow server to catch up
-    time.sleep(0.5)
-
-    # close all the connections
     for c in clients.connections:
-        th.Thread(target=c.gracefully_close_client).start()
+        th.Thread(target=c.gracefully_close_client, daemon=True).start()
+
+    time.sleep(2)
 
 
 def client():
+
     connected_list = ConnectedClients()
     connected_list.set_parallel(args.parallel)
-
-    # client_sock.settimeout(1)
 
     # create enough connections.
     while not connected_list.all_connected():
@@ -537,12 +553,11 @@ def server_handle_clients(clients):
 
     # periodically check if we are done recieving bytes.
     while not clients.all_done():
-        time.sleep(0.3)
-    # stop the clock
-    now = time.time()
+        time.sleep(0.1)
+
     # print the calculation from the different connections
     for c in clients.connections:
-        c.server_print(now, start)
+        c.server_print(c.time_done, start)
 
 
 def server():
