@@ -7,38 +7,175 @@ import threading as th
 import ipaddress
 import time
 import json
+import math
 
-# a variable used for building a list of connections on the server side
-# nyServer goes high when the expected amount of clients are connected.
-# a new instance of EnServer is then buildt, and may start recieving clients.
-nyServer = False
+# variables used for formatting prints, so that they are all alike.
+dashes = "------------------------------------------------------------------------------"
+client_header = "   IP:Port           Interval            Sent          Bandwidth"
+server_header = "   IP:Port           Interval          Received          Rate"
 
 
-# a base class the others are buildt upon, much space isn't saved, I thought there would be more...
-class EnCon:
-    def __init__(self, ip, port):
+# a class which holds some information about a group of  connections,
+# a list of clients, and how many we expect to recieve.
+class ConnectedClients:
+    def __init__(self):
+        # defaults to five, but is usually owerwritten
+        self.parallel = 5
+        self.connections = []
+
+    # set how many connections to expect
+    def set_parallel(self, parallel):
+        self.parallel = parallel
+
+    # check if all connections have same id, a more thorough explanation of this presumed bug in "server_handle_clients"
+    def mixed_clients(self):
+        valid_id = self.connections[0].id
+        for c in self.connections:
+            if c.id != valid_id:
+                return True
+        return False
+
+    def any_done(self):
+        for c in self.connections:
+            if c.is_done:
+                return True
+        return False
+
+    # check if all clients are done
+    def all_done(self):
+        for c in self.connections:
+            if not c.is_done:
+                return False
+        return True
+
+    # check if we are done adding clients to our list.
+    def all_connected(self):
+        if self.parallel == len(self.connections):
+            return True
+        else:
+            return False
+
+
+# base class for both my types of clients, num and time
+# they inherit alot from this class, but need a few different functions and variables since they behave different
+class AllClient:
+    def __init__(self, ip, port, interval, form, parallel, con):
         self.ip = ip
         self.port = port
+        self.interval = interval
+        self.form = form
+        self.parallel = parallel
+        self.is_done = False
+        self.byte = 0
+        self.prev_bytes = 0
+        self.id = ""
+        self.con = con
+        self.treshold = math.inf
 
+    #
+    def print_connection_statement(self):
+        raddr, rport = self.con.getpeername()
+        laddr, lport = self.con.getsockname()
 
-# a class which holds some information about a connection, a list of clients and if they are done or not, individually
-class EnServer(EnCon):
-    def __init__(self, ip, port):
-        super().__init__(ip, port)
-        self.connections = []
-        self.is_done = []
+        print(f"local: {laddr}:{lport} connected with remote: {raddr}:{rport}")
+
+    def set_socket(self, con):
+        self.con = con
+
+    def gracefully_close_client(self):
+        data = self.con.recv(1024).decode()
+        print(data)
+        if data == "ACK:BYE":
+            self.con.close()
+        else:
+            print("fant ikke ACK!")
+            self.con.close()
+            sys.exit(1)
+
+    def gracefully_close_server(self):
+        self.con.send("ACK:BYE".encode())
+        self.con.shutdown(1)
+        self.con.close()
+
+    def recieve_bytes(self):
+        while not self.is_done:
+            # recieve a chunk of data,
+            data = self.con.recv(2048)
+            # if the there is no information in the chunk, we quit.
+            if not data:
+                self.is_done = True
+                print(f"Connection remote: {self.ip}:{self.port} has failed!")
+                sys.exit(1)
+
+            # we add the chunk to the tally
+            self.byte = self.byte + len(data)
+            # search after a BYE statement from the client
+            data_decoded = data.decode()
+
+            if "BYE" in data_decoded:
+                self.is_done = True
+                self.gracefully_close_server()
+                break
+
+    # msg must be bytes sized and size must be an int
+    # and be the amount of bytes, we wish to transfer
+    def send_bytes(self, msg, size):
+        while not self.is_done and self.byte < self.treshold:
+            try:
+                self.con.send(msg)
+            except ConnectionResetError:
+                print(f"Connection to {args.serverip}:{args.port} has failed! server has ended")
+                self.is_done = True
+                sys.exit(1)
+            self.byte = self.byte + size
+
+    def intervall_print(self, now, then, start):
+        # fjern totals!
+
+        interval_bytes = self.byte - self.prev_bytes
+        self.prev_bytes = self.byte
+        str_then = "%.2fs" % (then - start)
+        str_now = "%.2fs" % (now - start)
+        interval_time = now - then
+        str_recieved = format_bytes(interval_bytes)
+
+        interval_bytes_ps = "%.2fMbps" % ((interval_bytes * 0.000008) / interval_time)
+
+        print(f"{self.ip}:{self.port}       {str_then} - {str_now}  "
+              f"   {str_recieved}        {interval_bytes_ps}")
+
+    def server_print(self, now, start):
+        interval_time = now - start
+
+        # rate for the total duration of a recieving server. 0.000008 = (mega*bits) = (8/1_000_000)
+        interval_bytes_ps = "%.2fMbps" % (self.byte * 0.000008 / interval_time)
+        str_now = "%.2fs" % interval_time
+        str_recieved = format_bytes(self.byte)
+
+        print(f"{self.ip}:{self.port}        0.00s - {str_now}  "
+              f"   {str_recieved}        {interval_bytes_ps}")
+        self.prev_bytes = self.byte
+
+    def generate_msg(self):
+        if self.form == "B":
+            return "w".encode()
+        else:
+            msg = "wops" * 250
+            return msg.encode()
+
+    def set_id(self, id):
+        self.id = str(id)
 
 
 # clients default to a timeclient, sending bytes for a time-period.
-class TimeClient(EnCon):
-    def __init__(self, ip, port, interval, tid, form, parallel, byte):
-        super().__init__(ip, port)
-        self.interval = interval
+class TimeClient(AllClient):
+    def __init__(self, ip, port, interval, tid, form, parallel, con):
+        super().__init__(ip, port, interval, form, parallel, con)
         self.tid = tid
-        self.form = form
-        self.parallel = parallel
-        self.byte = byte
-        self.is_done = False
+
+    def tid_done(self, now):
+        if now > self.tid:
+            self.is_done = True
 
     def __str__(self):  # prints a string in JSON formatting representing the client
         return '{"ip": "%s", "port": %s, "interval": %s, "tid": %s, "form": "%s", "parallel": %s}' % \
@@ -50,15 +187,25 @@ class TimeClient(EnCon):
 
 # num clients override a time client, since the time flag is always set by default.
 # a num client doesn't support sending based on time.
-class NumClient(EnCon):
-    def __init__(self, ip, port, interval, num, form, parallel, byte):
-        super().__init__(ip, port)
-        self.interval = interval
+class NumClient(AllClient):
+    def __init__(self, ip, port, interval, num, form, parallel, con):
+        super().__init__(ip, port, interval, form, parallel, con)
         self.num = num
-        self.byte = byte
-        self.form = form
-        self.parallel = parallel
-        self.is_done = False
+        self.treshold = self.how_many_bytes()
+
+    def byte_finished(self):
+        if self.byte >= self.treshold:
+            self.is_done = True
+
+    def how_many_bytes(self):
+        if self.form == "B":
+            return int(self.num)
+        elif self.form == "KB":
+            return int(self.num * 1000)
+        elif self.form == "MB":
+            return int(self.num * 1_000_000)
+        else:  # GB
+            return int(self.num * 1_000_000_000)
 
     def __str__(self):  # prints a string in JSON formatting representing the client
         return '{"ip": "%s", "port": %s, "interval": %s, "num": %s, "form": "%s", "parallel": %s}' % \
@@ -123,10 +270,9 @@ def valid_port(inn):
     return ut
 
 
-# returns a dictionary containing arguments
-# def args_to_dict(inn):
-
 # check if time input is an integer and more than zero
+# same as num, I just wanted a different print statement
+# and after reading the docs, I'm only allowed to pass one argument to these functions.
 def valid_time(inn):
     # if the input isn't an integer we complain and quit
     try:
@@ -141,6 +287,7 @@ def valid_time(inn):
 
 # check if the input is an integer and more than zero
 # same as time, I just wanted a different print statement
+# and after reading the docs, I'm only allowed to pass one argument to these functions.
 def valid_num(inn):
     # if the input isn't an integer we complain and quit
     try:
@@ -153,156 +300,252 @@ def valid_num(inn):
     return ut
 
 
-# start the argument parser
-parse = argparse.ArgumentParser(description="optional arguments for simpleperf", epilog='simpleperf --help')
+def get_args():
+    # start the argument parser
+    parse = argparse.ArgumentParser(prog="Simpleperf",
+                                    description="opens a tcp connection between a host and a server, "
+                                                "then stress that connection, written in python",
+                                    epilog='simpleperf --help')
 
-# optional arguments, with long and short name, default values when needed, info for the help page
-parse.add_argument('-s', '--server', action='store_true', help='enables server mode')
-parse.add_argument('-c', '--client', action='store_true', help='enables client mode')
-parse.add_argument('-p', '--port', type=valid_port, default=8088, help="which port to bind/open")
-parse.add_argument('-f', '--format', choices=['B', 'KB', 'MB', 'GB'],
-                   type=str, default='MB', help="format output with SI prefix")
+    # optional arguments, with long and short name, default values when needed, info for the help page
+    parse.add_argument('-s', '--server', action='store_true', help='enables server mode')
+    parse.add_argument('-c', '--client', action='store_true', help='enables client mode')
+    parse.add_argument('-p', '--port', type=valid_port, default=8088, help="which port to bind/open")
+    parse.add_argument('-f', '--format', choices=['B', 'KB', 'MB', 'GB'],
+                       type=str, default='MB', help="format output with SI prefix")
 
-# server arguments ignored if running a server
-parse.add_argument('-b', '--bind', type=valid_ip, default=get_ip(),  # attempts to grab ip from ifconfig
-                   help="ipv4 adress to bind server to")
+    # server arguments ignored if running a server
+    parse.add_argument('-b', '--bind', type=valid_ip, default=get_ip(),  # attempts to grab ip from ifconfig
+                       help="ipv4 adress to bind server to, default binds to local address")
 
-# client arguments ignored if running a client
-parse.add_argument('-I', '--serverip', type=valid_ip, default="10.0.0.2",  # default value is set to node h1
-                   help="ipv4 address to connect with")
-parse.add_argument('-t', '--time', type=valid_time, default=50, help="time duration to transfer bytes")
-parse.add_argument('-i', '--interval', type=valid_time, default=25, help='intervall between prints to consoll')
-parse.add_argument('-P', '--parallel', type=int, choices=[1, 2, 3, 4, 5], default=1,
-                   help='run client in parallel, max 5 threads')
-parse.add_argument('-n', '--num', type=valid_num, required=False, help='amount of bytes to transfer')
+    # client arguments ignored if running a client
+    parse.add_argument('-I', '--serverip', type=valid_ip, default="10.0.0.2",  # default value is set to node h1
+                       help="ipv4 address to connect with, default connects with node h1")
+    parse.add_argument('-t', '--time', type=valid_time, default=25, help="time duration to transfer bytes")
+    parse.add_argument('-i', '--interval', type=valid_time, default=25, help='time interval between prints to console')
+    parse.add_argument('-P', '--parallel', type=int, choices=[1, 2, 3, 4, 5], default=1,
+                       help='run client in parallel, max 5 threads')
+    parse.add_argument('-n', '--num', type=valid_num, required=False,
+                       help='amount of bytes to transfer, takes format flag into account')
 
-dashes = "---------------------------------------------------------------------------------------"
+    # parse the arguments
+    return parse.parse_args()
 
-# parse the arguments
-args = parse.parse_args()
+
+args = get_args()
 
 # an instance of simpleperf may only be server or client
 if not (args.server ^ args.client):
     raise AttributeError("you must run either in server or client mode")
 
 
-# returns the value as true bytes, based on the -f flag.from
-# if a user sets -f 'B' -num 9 only 9 bytes should be sent
-def how_many_bytes(format, value):
-    if format == "B":
-        return int(value)
-    elif format == "KB":
-        return int(value * 1000)
-    elif format == "MB":
-        return int(value * 1_000_000)
-    else:
-        # GB
-        return int(value * 1_000_000_000)
-
-
-# formats a byte-per second as a string with two decimals
-def returnMbps(value):
-    return "%.2fMbps" % (value * 8 / 1_000_000)
-
-
-# returns a string containing the received/sent bytes with the requested format
-def format_bytes(format, value):
-    if format == "B":
-        return int(value)
-    elif format == "KB":
+def format_bytes(value):
+    if args.format == "B":
+        return "%s%s" % (value, args.format)
+    elif args.format == "KB":
         a = (value / 1000.0)
-        return "%.2f%s" % (a, format)
-    elif format == "MB":
+        return "%.2f%s" % (a, args.format)
+    elif args.format == "MB":
         a = (value / 1_000_000.0)
-        return "%.2f%s" % (a, format)
-    else:
-        # GB
+        return "%.2f%s" % (a, args.format)
+    else:  # GB
         a = (value / 1_000_000_000.0)
-        return "%.2f%s" % (a, format)
+        return "%.2f%s" % (a, args.format)
 
 
-def recieve(con, en_client):
-    while not en_client.is_done:
-        en_client.byte.append(con.recv(2042))
+def time_client(clients):
+    # print a connection statement from each client
+    for c in clients.connections:
+        c.print_connection_statement()
+    # print a header for the transfer of bytes
+    print(f"{dashes}\n{client_header}\n")
 
+    # the message should always be 1KB when we are dealing with a TimeClient
+    msg = "wops" * 250
+    msg_size = 1000
+    msg = msg.encode()
 
-def transmitt(con, en_client, msg, size):
-    while not en_client.is_done:
-        con.send(msg)
-        en_client.byte += size
+    # calculate how many times we need to print
+    # having a bigger intervall than the total transmitt time does not make sense
 
+    if args.interval > args.time:
+        args.interval = args.time
+    loops = math.floor(args.time / args.interval)
 
-# function to handle a single connection from a client
-def server_handle_client(con, serveren):
-    global nyServer
-    # assign remote address and port
-    # assign local address and port
-    raddr, rport = con.getpeername()
-    laddr, lport = con.getsockname()
+    # start a timer and a time for the periods between intervalls
+    start = time.time()
+    now = start
+    then = start
+    number_of_prints = 0
 
-    print(f"A simpleperf client with address <{raddr}:{rport}> is connected with <{laddr}:{lport}>")
+    # create individual threads for each connection to send bytes.
+    for c in clients.connections:
+        th.Thread(target=c.send_bytes, daemon=True, args=(msg, msg_size)).start()
+    # periodically check if we are done transmitting
+    for i in range(loops):
+        while (now - then) < args.interval:
+            if clients.any_done():
+                print("what")
+                break
+            time.sleep(0.3)
+            now = time.time()
 
-    con.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
+        for c in clients.connections:
+            if number_of_prints == 0:
+                c.server_print(now, start)
+            else:
+                c.intervall_print(now, then, start)
+        then = time.time()
+        number_of_prints = number_of_prints + 1
 
-    # recieve a packet containing a client object
-    cli_args = json.loads(con.recv(2042).decode())
+    # set all connections to done
+    for c in clients.connections:
+        c.is_done = True
 
-    # attempt to create numClient, if num flag is set.
-    # else make a timeClient.
-    try:
-        remote_client = NumClient(raddr, rport, cli_args['interval'],
-                                  cli_args['num'], cli_args['form'], cli_args['parallel'], [])
-    except KeyError:
-        remote_client = TimeClient(raddr, rport, cli_args['interval'],
-                                   cli_args['tid'], cli_args['form'], cli_args['parallel'], [])
+    # if we have more than one interval, print a totalsum, for all
+    if number_of_prints > 1:
+        print(f"{dashes}\nTotals:\n")
+        for c in clients.connections:
+            c.server_print(now, start)
 
-    # append the connection to our server object
-    connection_number = len(serveren.connections)
-    serveren.connections.append(remote_client)
-    serveren.is_done.append(False)
-    # start a print session when all are connected. and set up a new server object
-    if len(serveren.connections) == remote_client.parallel:
-        nyServer = True
-        th.Thread(target=server_print, args=(serveren,)).start()
+    # transmitt a D for done
+    for c in clients.connections:
+        c.con.send("BYE".encode())
 
-    # start recieving and quit on num limit or time.
-    # start print thread
-
-    data = con.recv(2042)
-    remote_client.byte.append(data)
-    lastChar = data.decode()[-1]
-    t = th.Thread(target=recieve, args=(con, remote_client))
-    t.start()
-
-    while lastChar != "D":
-        time.sleep(2)
-        data = remote_client.byte[len(remote_client.byte) - 1].decode()
-        lastChar = data[-1]
-        print(lastChar)
-        if not data:
-            # if there is no data, something has gone wrong, and we quit.
-            print(f"Connection with {remote_client.ip}:{remote_client.port} has failed!")
-            con.close()
-            break
-
-    remote_client.is_done = True
-    serveren.is_done[connection_number] = True
+    # allow server to catch up
     time.sleep(0.5)
 
-    data = con.recv(1024).decode()
-    remote_client.byte = remote_client.byte + data
-    fin = remote_client.byte[-3:]
-    if fin == "BYE":
-        con.send("ACK:BYE".encode())
-        con.shutdown(1)
+    # close all the connections
+    for c in clients.connections:
+        th.Thread(target=c.gracefully_close_client).start()
+
+
+def num_client(clients):
+    # print a connection statement from each client
+    for c in clients.connections:
+        c.print_connection_statement()
+    # print a header for the transfer of bytes
+    print(f"{dashes}\n{client_header}\n")
+    # calculate the size of the message to be sent
+    msg = clients.connections[0].generate_msg()
+    msg_size = len(msg)
+
+    # start a timer and a time for the periods between intervalls
+    start = time.time()
+    now = start
+    then = start
+    number_of_prints = 0
+
+    # create individual threads for each connection to send bytes.
+
+    for c in clients.connections:
+        th.Thread(target=c.send_bytes, daemon=True, args=(msg, msg_size)).start()
+
+    # periodically check if we are done transmitting
+    while not clients.all_done():
+        now = time.time()
+        for c in clients.connections:
+            c.byte_finished()
+        # if print intervall is met we print a statemnt for each connection
+        if (now - then) > args.interval:
+            for c in clients.connections:
+                if number_of_prints == 0:
+                    c.server_print(now, then)
+                else:
+                    c.intervall_print(now, then, start)
+            number_of_prints = number_of_prints + 1
+            then = time.time()
+        time.sleep(0.3)
+    # transmitt a D for done
+    for c in clients.connections:
+        c.is_done = True
+        c.con.send("BYE".encode())
+
+    # print an end statement for each connection if we have more than one intervall
+    if 0 == number_of_prints or 1 < number_of_prints:
+        print(f"{dashes}\nTotals:\n")
+        for c in clients.connections:
+            c.server_print(now, start)
+
+    # allow server to catch up
+    time.sleep(0.5)
+
+    # close all the connections
+    for c in clients.connections:
+        th.Thread(target=c.gracefully_close_client).start()
+
+
+def client():
+    connected_list = ConnectedClients()
+    connected_list.set_parallel(args.parallel)
+
+    # client_sock.settimeout(1)
+
+    # create enough connections.
+    while not connected_list.all_connected():
+        client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            client_sock.connect((args.serverip, args.port))
+        except ConnectionError:
+            print(f"Connection to {args.serverip}:{args.port} has failed, quitting!")
+            sys.exit(1)
+        # create a client, and send it to the server.
+        # if num flag is set, overrides time.
+        laddr, lport = client_sock.getsockname()
+
+        if args.num:
+            en_client = NumClient(laddr, lport, args.interval,
+                                  args.num, args.format, args.parallel, client_sock)
+            connected_list.connections.append(en_client)
+        else:
+            en_client = TimeClient(laddr, lport, args.interval,
+                                   args.time, args.format, args.parallel, client_sock)
+            connected_list.connections.append(en_client)
+
+        en_client.set_id(id(connected_list))
+        client_sock.send(en_client.__str__().encode())
+
+    # lets the server catch up, and be ready to recieve
+    time.sleep(0.5)
+    if args.num:
+        num_client(connected_list)
     else:
-        print("what")
-    con.close()
+        time_client(connected_list)
 
 
-# function to handle incomming connections, they are handled in separate threads
+def server_handle_clients(clients):
+    # we first check that all the connections we got are from the same client,
+    # I believe I have a bug here, that if two clients open a connection at the exact same time.
+    # the list of clients may be a mixed list.
+    if clients.mixed_clients():
+        print("fatal error, mixed set of connected clients, server shutting down!")
+        for c in clients:
+            c.con.close()
+        sys.exit()
+
+    # print a statement about each connection
+    for c in clients.connections:
+        c.print_connection_statement()
+
+    # print a header for the recieving of bytes
+    print(f"{dashes}\n{server_header}\n")
+
+    start = time.time()
+    # start individual threads that recieve bytes from their connection, until they are signaled done, or fail
+    for c in clients.connections:
+        th.Thread(target=c.recieve_bytes, daemon=True).start()
+
+    # periodically check if we are done recieving bytes.
+    while not clients.all_done():
+        time.sleep(0.3)
+    # stop the clock
+    now = time.time()
+    # print the calculation from the different connections
+    for c in clients.connections:
+        c.server_print(now, start)
+
+
 def server():
-    global nyServer
     # open a socket using ipv4 address(AF_INET), and a TCP connection (SOCK_STREAM)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as servsock:
         # attempt to bind to port, quit if failed.
@@ -314,263 +557,50 @@ def server():
 
         servsock.listen(65535)
         print(f"{dashes}\n   a simpleperf server is listening on <{args.bind}:{args.port}>\n{dashes}")
-        server = EnServer(args.bind, args.port)
-        # accepts a connection and start a thread handling the connection.
+
+        # server = conn(args.bind, args.port)
+        # accepts a connection and a ConnectedClients class to handle connected clients.
+        connected_clients = ConnectedClients()
+        # perpetually recieve a connection, and a client, creates a group of connections and then handles them
         while True:
-            # accepts an incoming client and deliver requested document.
-            con, addr_info = servsock.accept()
-            if nyServer:
-                server = EnServer(addr_info[0], addr_info[1])
-                nyServer = False
-            # start a thread which is deamon, so it quits when main thread quits.
-            t = th.Thread(target=server_handle_client, args=(con, server), daemon=True)
-            # start the thread
-            t.start()
-            time.sleep(2)
+            # accepts an incoming client and receive info about the connection.
+            try:
+                con, addr_info = servsock.accept()
+            # quit if the user terminates the program
+            except KeyboardInterrupt:
+                print("interrupt recieved, attempting to shut down")
+                servsock.close()
+                sys.exit(1)
+            # quit if the connection fails for some reason
+            except ConnectionError:
+                print("Connection failed, attempting to shut down")
+                servsock.close()
+                sys.exit(1)
 
+            # assign remote address and port
+            # assign local address and port
+            raddr, rport = con.getpeername()
+            laddr, lport = con.getsockname()
 
-#
-def transfer_time_client(enClient, full_list):
-    number = len(full_list) - 1
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as cli:
+            setup = json.loads(con.recv(1024).decode())
+            connected_clients.set_parallel(setup['parallel'])
 
-        cli.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
-        # cli.settimeout(11)
-        try:
-            cli.connect((enClient.ip, enClient.port))
-        except ConnectionError:
-            raise ConnectionError(f"Connection to {enClient.ip}:{enClient.port} failed, quitting")
+            # create an AllClient from the recieved setup info.
+            try:
+                remote_client = AllClient(raddr, rport, setup['interval'],
+                                          setup['form'], setup['parallel'], con)
+            except ValueError:
+                print(f"fatal error, couldn't create client from {raddr}:{rport}")
+                sys.exit(1)
 
-        # grab remote address and port
-        ip, port = cli.getsockname()
-        raddr, rport = cli.getpeername()
-        print(f"local: {ip}:{port} connected with remote: {raddr}:{rport}")
-        cli.send(enClient.__str__().encode())
-        time.sleep(0.5)
+            # add the connection to the list of connections.
+            connected_clients.connections.append(remote_client)
 
-        if args.format == 'B':
-            msg = "w"
-        else:
-            msg = "wop!" * 250
-        then = time.time()
-        now = 0
-
-        msg_size = len(msg)
-        msg = msg.encode()
-        t = th.Thread(target=transmitt, args=(cli, enClient, msg, msg_size))
-        t.start()
-        while (now - then) < enClient.tid:
-            time.sleep(0.7)
-        full_list[number] = True
-        enClient.is_done = True
-        cli.send("D".encode())
-
-        time.sleep(0.5)
-        cli.send("BYE".encode())
-
-        ack = cli.recv(1024).decode()
-        if ack == "ACK:BYE":
-            cli.shutdown(1)
-        else:
-            print("ack not recieved forsing a close")
-
-        cli.close()
-
-
-def transfer_byte_client(enClient, full_list):
-    number = len(full_list) -1
-    # open a socket using ipv4 address(AF_INET), and a TCP connection (SOCK_STREAM)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as cli:
-        cli.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
-
-        # set a timeout timer.
-        # cli.settimeout(11)
-        try:
-            cli.connect((enClient.ip, enClient.port))
-        except ConnectionError:
-            raise ConnectionError(f"Connection to {enClient.ip}:{enClient.port} failed, quitting")
-
-        # grab remote address and port
-        ip, port = cli.getsockname()
-        raddr, rport = cli.getpeername()
-        # print info
-        print(f"local: {ip}:{port} connected with remote: {raddr}:{rport}")
-
-        # build a byte message which is 1000 B aprox 1 KB, unless we are working with single bytes.
-        if args.format == 'B':
-            msg = "w"
-        else:
-            msg = ("wop!" * 250)
-
-        msg_size = len(msg)
-        msg = msg.encode()
-
-        cli.send(enClient.__str__().encode())
-        treshold = how_many_bytes(enClient.form, enClient.num)
-        # allows the server to catch up, before we start our measurements
-        time.sleep(0.5)
-
-        for thread in th.enumerate():
-            print(thread.name)
-
-        # sends bytes until we reached requested bytes.
-        t = th.Thread(target=transmitt, args=(cli, enClient, msg, msg_size))
-        t.start()
-
-        while len(enClient.byte) < treshold:
-            time.sleep(2)
-
-        full_list[number] = True
-        enClient.is_done = True
-        # when we are finished, send the code D for done:
-        cli.send("D".encode())
-
-        fin = cli.recv(1024).decode()
-        if fin == "FIN":
-            cli.send("FIN".encode())
-            ack = cli.recv(1024)
-            if ack == "ACK":
-                cli.shutdown(1)
-        else:
-            print("what")
-        cli.close()
-
-
-# prints until client says claims transfer is done
-def server_print(enServer):
-    # we first check that all the connections we got are from the same client,
-    # I believe I have a bug here, that if two clients open a connection at the exact same time.
-    # the list of clients may be a mixed list.
-    # if the list has more than one connection
-    if len(enServer.connections) > 1:
-        for i in range(1, len(enServer.connections)):
-            if enServer.connections[i - 1].get_important() != enServer.connections[i].get_important():
-                raise TypeError('Mixed set of clients!!!!')
-    # I haven't been able to reproduce this bug, but I believe it is there.
-
-    # prints labels
-    print(f"{dashes}\n  IP:Port           Interval             Recieved        Bandwidth\n")
-    # wait untill we are done recieving bytes.
-    start = time.time()
-    while not all(enServer.is_done):
-        time.sleep(0.1)
-
-    end = time.time()
-    time_difference = end - start
-    intervall_str = "%.2fs" % time_difference
-    # print some information about each connection
-    for c in enServer.connections:
-        recieved = format_bytes(c.form, len(c.byte))
-        rate = returnMbps(len(c.byte) / time_difference)
-        print(f"{c.ip}:{c.port}       {0} - {intervall_str}  "
-              f"   {recieved}        {rate}")
-    print(dashes)
-
-
-# stop printing when done sending bytes.
-def print_byte(clients, full_list, interval):
-    # prints labels
-    print(f"{dashes}\n  IP:Port           Interval             Sent        Bandwidth\n")
-
-    # start a print method for the group of connections.
-    prev_bytes = []
-    start = time.time()
-    then = time.time()
-    now = 0
-    prev_step = 0.0
-    start = time.time()
-    for c in clients:
-        prev_bytes.append(0)
-
-    # prints while we are sending, attemps to break cycle when done
-    while not all(full_list):
-        time.sleep(0.7)
-        now = time.time()
-
-        if (now - then) > interval:
-            next_step = "%.2f" % (now - start)
-            then = time.time()
-            for i in range(len(clients)):
-                c = clients[i]
-                num_bytes = 0
-                for j in range(c.byte):
-                    num_bytes += len(c.byte[i])
-
-                a_prev_byte = num_bytes - prev_bytes[i]
-                prev_bytes[i] = num_bytes
-                form_bytes = format_bytes(c.form, num_bytes)
-                rate = returnMbps(a_prev_byte / interval)
-
-                print(f"{c.ip}:{c.port}        {prev_step} - {next_step}"
-                      f"        {form_bytes}       {rate}")
-            prev_step = next_step
-        # we need to quit after one run if time and intervall are equal
-
-
-# stop printing when time is met.
-def print_time(clients, tid, interval, full_list):
-    # if time interval is bigger than time, we print after time is done.
-    # example tid = 4, and interval 50, doesn't make much sense
-    if interval > tid:
-        interval = tid
-
-    # print labels
-    print(f"{dashes}\n IP:Port            Interval           Sent        Bandwidth\n")
-    #
-    start = time.time()
-    then = time.time()
-    now = 0
-    prev_step = 0.0
-    # a list containing how many bytes each client has recieved
-    prev_bytes = []
-    for c in clients:
-        prev_bytes.append(0)
-
-    while not all(full_list):
-        time.sleep(0.7)
-        now = time.time()
-
-        if (now - then) > interval:
-            next_step = "%.2f" % (now - start)
-            then = time.time()
-            for i in range(len(clients)):
-                c = clients[i]
-                num_bytes = c.byte
-                a_prev_byte = num_bytes - prev_bytes[i]
-                prev_bytes[i] = num_bytes
-                form_bytes = format_bytes(c.form, num_bytes)
-                rate = returnMbps(a_prev_byte / interval)
-
-                print(f"{c.ip}:{c.port}        {prev_step} - {next_step}"
-                      f"        {form_bytes}       {rate}")
-            prev_step = next_step
-
-    print(f"\n{dashes}")
-
-
-# creates seperate threads for the clients.
-def client():
-    # establish n connections acording to -P flag
-    clients = []
-    full_list = []
-    # if num flag is set, overides time flag.
-    print(f"{dashes}\nA simpleperf client is attempting to connect with <{args.serverip}:{args.port}>\n{dashes}")
-    if args.num:
-        for i in range(args.parallel):
-            en_con = NumClient(args.serverip, args.port, args.interval, args.num, args.format, args.parallel, 0)
-            clients.append(en_con)
-            full_list.append(False)
-            th.Thread(target=transfer_byte_client, daemon=False, args=(en_con, full_list)).start()
-        time.sleep(0.5)
-        th.Thread(target=print_byte, args=(clients, full_list, args.interval), daemon=True).start()
-    else:
-        for i in range(args.parallel):
-            en_con = TimeClient(args.serverip, args.port, args.interval, args.time, args.format, args.parallel, 0)
-            clients.append(en_con)
-            full_list.append(False)
-            th.Thread(target=transfer_time_client, daemon=False, args=(en_con, full_list)).start()
-        time.sleep(0.5)
-        th.Thread(target=print_time, daemon=True, args=(clients, args.time, args.interval, full_list)).start()
+            if connected_clients.all_connected():
+                # start a thread which is deamon, so it quits when main thread quits.
+                th.Thread(target=server_handle_clients, args=(connected_clients,), daemon=True).start()
+                # create a new group
+                connected_clients = ConnectedClients()
 
 
 # if in server mode run server, otherwise run client mode
