@@ -435,8 +435,8 @@ def time_client(clients):
 
     time.sleep(2)
 
-def num_client(clients):
 
+def num_client(clients):
     # calculate the size of the message to be sent
     msg = clients.connections[0].generate_msg()
     msg_size = len(msg)
@@ -476,10 +476,9 @@ def num_client(clients):
                     if not c.is_done:
                         c.intervall_print(c.time_done, then, start)
 
-            print("--") # used to group together prints
+            print("--")  # used to group together prints
             number_of_prints = number_of_prints + 1
             then = time.time()
-
 
     # print total sum, if we have more than one print or no prints
     print(f"{dashes}\nTotals:\n")
@@ -493,7 +492,6 @@ def num_client(clients):
 
 
 def client():
-
     connected_list = ConnectedClients()
     connected_list.set_parallel(args.parallel)
 
