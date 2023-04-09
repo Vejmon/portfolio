@@ -5,6 +5,7 @@ simepleperf can be run together with some arguments.
 use either -c, '--client' or -s, '--server' to specify, one must be set.
 
 when in server mode:
+
     -p, --port, sets which port to bind server to, connecting clients must attempt to connect with the same port.
         DEFAULT: 8088
     -f, --format, specify which SI prefix used when printing the amount of received bytes on the server.
@@ -13,6 +14,7 @@ when in server mode:
         DEFAULT: attempts to grab a local ip from ifconfig.
 
 when in client mode:
+
     -p, --port, set which port to attempt to connect with
         DEFAULT: 8088
     -I, --serverip, set which ipv4 address to connect with, must be dotted decimal format: 3.3.3.3
