@@ -1,0 +1,6 @@
+local: 10.0.6.1:33966 connected with remote: 10.0.6.2:8088
+------------------------------------------------------------------------------
+   IP:Port           Interval            Sent          Bandwidth
+
+10.0.6.1:33966       0.00s - 25.06s     72.65MB        23.19Mbps
+ACK:BYE recieved from 10.0.6.1:33966, closing socket
