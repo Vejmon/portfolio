@@ -74,7 +74,7 @@ class AllClient:
         self.treshold = math.inf
         self.time_done = 0.0
 
-    #
+    # print a statement to the console regarding a connected client.
     def print_connection_statement(self):
         raddr, rport = self.con.getpeername()
         laddr, lport = self.con.getsockname()

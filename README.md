@@ -40,6 +40,9 @@ examples:
     simpleperf.py -c -n 10 -P 3
     starts three parallel connections which will transmitt 10MB each to a server on node h1.
     will print to console every 25 seconds.
+    
+    simpleper.py -s -f KB -p 12202
+    run a simpleperf server on port 12202 with the first ip in ifconfig, format prints with KB.
 
     simpleperf.py -c -t 90 -i 3 -I 10.0.7.2 -p 12202 
     start a connection with node h9 on port 12202, and transmitt bytes for 90 secnods, 
