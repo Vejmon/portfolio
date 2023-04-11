@@ -407,7 +407,7 @@ def time_client(clients):
     while (now - start) < args.time and not clients.all_done():
 
         if (now - then) > args.interval:
-            if first_print == 0:
+            if first_print:
                 for c in clients.connections:
                     c.server_print(now, start)
             else:
@@ -542,9 +542,6 @@ def client():
 
         # let server know som info about our client
         client_sock.send(en_client.__str__().encode())
-
-    # lets the server catch up, and be ready to recieve
-    time.sleep(0.3)
 
     # start a transmission with either time constraint or bytes.
     if args.num:

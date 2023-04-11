@@ -58,3 +58,6 @@ python libraries used:
     socket                      threading
     ipaddress                   time
     json                        math
+
+I've also decided that the print statement on both client and serverside is using the client's ip-port pair,
+so that keeping tabs about which parallel connections throughput is which might be easier

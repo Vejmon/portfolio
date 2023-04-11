@@ -1,6 +1,19 @@
-local: 10.0.0.2:33948 connected with remote: 10.0.5.2:8088
+client:
+local: 10.0.0.2:45872 connected with remote: 10.0.5.2:8088
 ------------------------------------------------------------------------------
    IP:Port           Interval            Sent          Bandwidth
 
-10.0.0.2:33948       0.00s - 25.03s     99.95MB        31.94Mbps
-ACK:BYE recieved from 10.0.0.2:33948, closing socket
+10.0.0.2:45872       0.00s - 25.03s     99.35MB        31.75Mbps
+ACK:BYE recieved from 10.0.0.2:45872, closing socket
+
+server:
+------------------------------------------------------------------------------
+   a simpleperf server is listening on <10.0.5.2:8088>
+------------------------------------------------------------------------------
+local: 10.0.5.2:8088 connected with remote: 10.0.0.2:45872
+------------------------------------------------------------------------------
+   IP:Port           Interval          Received          Rate
+
+10.0.0.2:45872        0.00s - 27.90s     99.35MB        28.49Mbps
+
+
