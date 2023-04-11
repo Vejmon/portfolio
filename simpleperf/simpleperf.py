@@ -56,6 +56,13 @@ class ConnectedClients:
         else:
             return False
 
+    # check if all connections have received an ack from the server
+    def all_acked(self):
+        for c in self.connections:
+            if not c.ack_received:
+                return False
+        return True
+
 
 # base class for both my types of clients, num and time
 # they inherit alot from this class, but need a few different functions and variables since they behave different
@@ -73,6 +80,7 @@ class AllClient:
         self.con = con
         self.treshold = math.inf
         self.time_done = 0.0
+        self.ack_received = False
 
     # print a statement to the console regarding a connected client.
     def print_connection_statement(self):
@@ -99,6 +107,8 @@ class AllClient:
         # attempts to recieve an ack
         data = self.con.recv(1024).decode()
         if data == "ACK:BYE":
+            self.time_done = time.time()
+            self.ack_received = True
             print(f"{data} recieved from {self.ip}:{self.port}, closing socket")
             self.con.close()
         else:
@@ -420,6 +430,9 @@ def time_client(clients):
         time.sleep(0.1)
         now = time.time()
 
+    # print either the last intervall, or the first.
+    for c in clients.connections:
+        c.intervall_print(now, then, start)
 
     for c in clients.connections:
         # stop sending bytes.
@@ -427,15 +440,14 @@ def time_client(clients):
         # send a bye message to server to let it know we are done.
         th.Thread(target=c.gracefully_close_client).start()
 
-    # print either the last intervall, or the first.
-    for c in clients.connections:
-        c.intervall_print(now, then, start)
+    # wait untill all connected clients have received an ack from the server
+    while not clients.all_acked():
+        time.sleep(0.3)
 
-    if not first_print:
-        # print a total sum for all clients if we have printed more than once, making the statement more human-readable.
-        print(f"{dashes}\nTotals:")
-        for c in clients.connections:
-            c.server_print(now, start)
+    # print a total sum for all clients if we have printed more than once, making the statement more human-readable.
+    print(f"{dashes}\nTotals:")
+    for c in clients.connections:
+        c.server_print(c.time_done, start)
 
 
 # if num flag is set, we are to send a number of bytes.
@@ -492,15 +504,19 @@ def num_client(clients):
     for c in clients.connections:
         c.intervall_print(c.time_done, then, start)
 
+    # attempt to close connection
+    for c in clients.connections:
+        th.Thread(target=c.gracefully_close_client).start()
+
+    # wait untill all clients have received an ack, before we print final statement
+    while not clients.all_acked():
+        time.sleep(0.3)
+
     # print total sum for all clients, if we have more than one print.
     if not first_print:
         print(f"{dashes}\nTotals:\n")
         for c in clients.connections:
             c.server_print(c.time_done, start)
-
-    # attempt to close connection
-    for c in clients.connections:
-        th.Thread(target=c.gracefully_close_client).start()
 
 
 # used to create either NumClients or TimeClients and add them to a group of connections.
@@ -542,6 +558,10 @@ def client():
 
         # let server know som info about our client
         client_sock.send(en_client.__str__().encode())
+
+    #let server create clients and catch up
+    time.sleep(0.3)
+
 
     # start a transmission with either time constraint or bytes.
     if args.num:

@@ -1,11 +1,30 @@
 PING 10.0.5.2 (10.0.5.2) 56(84) bytes of data.
-64 bytes from 10.0.5.2: icmp_seq=1 ttl=61 time=88.7 ms
-64 bytes from 10.0.5.2: icmp_seq=2 ttl=61 time=146 ms
-64 bytes from 10.0.5.2: icmp_seq=3 ttl=61 time=217 ms
-64 bytes from 10.0.5.2: icmp_seq=4 ttl=61 time=268 ms
-64 bytes from 10.0.5.2: icmp_seq=5 ttl=61 time=317 ms
-64 bytes from 10.0.5.2: icmp_seq=6 ttl=61 time=367 ms
-64 bytes from 10.0.5.2: icmp_seq=7 ttl=61 time=418 ms
-64 bytes from 10.0.5.2: icmp_seq=8 ttl=61 time=468 ms
-64 bytes from 10.0.5.2: icmp_seq=9 ttl=61 time=518 ms
-64 bytes from 10.0.5.2: icmp_seq=10 ttl=61 time=569 ms
+64 bytes from 10.0.5.2: icmp_seq=1 ttl=61 time=78.7 ms
+64 bytes from 10.0.5.2: icmp_seq=2 ttl=61 time=132 ms
+64 bytes from 10.0.5.2: icmp_seq=3 ttl=61 time=192 ms
+64 bytes from 10.0.5.2: icmp_seq=4 ttl=61 time=242 ms
+64 bytes from 10.0.5.2: icmp_seq=5 ttl=61 time=292 ms
+64 bytes from 10.0.5.2: icmp_seq=6 ttl=61 time=342 ms
+64 bytes from 10.0.5.2: icmp_seq=7 ttl=61 time=392 ms
+64 bytes from 10.0.5.2: icmp_seq=8 ttl=61 time=454 ms
+64 bytes from 10.0.5.2: icmp_seq=9 ttl=61 time=527 ms
+64 bytes from 10.0.5.2: icmp_seq=10 ttl=61 time=612 ms
+64 bytes from 10.0.5.2: icmp_seq=11 ttl=61 time=704 ms
+64 bytes from 10.0.5.2: icmp_seq=12 ttl=61 time=809 ms
+64 bytes from 10.0.5.2: icmp_seq=13 ttl=61 time=832 ms
+64 bytes from 10.0.5.2: icmp_seq=14 ttl=61 time=648 ms
+64 bytes from 10.0.5.2: icmp_seq=15 ttl=61 time=626 ms
+64 bytes from 10.0.5.2: icmp_seq=16 ttl=61 time=673 ms
+64 bytes from 10.0.5.2: icmp_seq=17 ttl=61 time=726 ms
+64 bytes from 10.0.5.2: icmp_seq=18 ttl=61 time=768 ms
+64 bytes from 10.0.5.2: icmp_seq=19 ttl=61 time=799 ms
+64 bytes from 10.0.5.2: icmp_seq=20 ttl=61 time=820 ms
+64 bytes from 10.0.5.2: icmp_seq=21 ttl=61 time=830 ms
+64 bytes from 10.0.5.2: icmp_seq=22 ttl=61 time=666 ms
+64 bytes from 10.0.5.2: icmp_seq=23 ttl=61 time=603 ms
+64 bytes from 10.0.5.2: icmp_seq=24 ttl=61 time=528 ms
+64 bytes from 10.0.5.2: icmp_seq=25 ttl=61 time=560 ms
+
+--- 10.0.5.2 ping statistics ---
+25 packets transmitted, 25 received, 0% packet loss, time 24008ms
+rtt min/avg/max/mdev = 78.714/554.219/832.022/226.020 ms
