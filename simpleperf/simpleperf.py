@@ -172,7 +172,8 @@ class AllClient:
                 self.time_done = time.time()
                 self.is_done = True
 
-    # used when a then time can be established, prints how many bytes have been recieved and how fast in the interval
+    # used when a then time can be established,
+    # prints how many bytes have been received and how fast in the interval
     def intervall_print(self, now, then, start):
         interval_bytes = self.byte - self.prev_bytes
         self.prev_bytes = self.byte
@@ -186,7 +187,7 @@ class AllClient:
         print(f"{self.ip}:{self.port}       {str_then} - {str_now}  "
               f"   {str_recieved}        {interval_bytes_ps}")
 
-    # used to print a total sum of rate and bytes, start time is also set to be 0.0.
+    # used to print a total sum of rate and bytes, is also used for a first print.
     def server_print(self, now, start):
         interval_time = now - start
         # rate for the total duration of a recieving server or client. 0.000008 = (mega*bits) = (8/1_000_000)
@@ -211,7 +212,8 @@ class AllClient:
         self.id = str(id)
 
 
-# clients default to a timeclient, sending bytes for a time-period. this class is mostly depricated at this point.
+# clients default to a TimeClient, sending bytes for a time-period. this class is mostly depricated at this point.
+# meaning I could have used an AllClient for time clients, and a NumClient for when num flag is set.
 class TimeClient(AllClient):
     def __init__(self, ip, port, interval, tid, form, parallel, con):
         super().__init__(ip, port, interval, form, parallel, con)
