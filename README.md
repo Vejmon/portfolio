@@ -1,5 +1,5 @@
 simpleperf is a tool used to measure total bandwith between to nodes on a network.
-to connect two nodes, one must be running a server version of this program, and the other a client. 
+to connect two nodes, one must be running a server version of this program, and the other a client.
 
 simpleperf opens a tcp connection and ipv4 is used for addressing between the hosts.
 both the server and client will print statements about the transferring if bytes between them.

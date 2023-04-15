@@ -514,11 +514,10 @@ def num_client(clients):
     while not clients.all_acked():
         time.sleep(0.3)
 
-    # print total sum for all clients, if we have more than one print.
-    if not first_print:
-        print(f"{dashes}\nTotals:\n")
-        for c in clients.connections:
-            c.server_print(c.time_done, start)
+    # print total sum for all clients, after receiving ack from the server.
+    print(f"{dashes}\nTotals:\n")
+    for c in clients.connections:
+        c.server_print(c.time_done, start)
 
 
 # used to create either NumClients or TimeClients and add them to a group of connections.
